@@ -19,8 +19,13 @@
 package spendreport
 
 import java.util.Properties
+import java.util.concurrent.TimeUnit
 
 import org.apache.flink.api.common.functions.MapFunction
+import org.apache.flink.api.common.serialization.SimpleStringEncoder
+import org.apache.flink.api.common.serialization.Encoder
+import org.apache.flink.core.fs.Path
+import org.apache.flink.streaming.api.functions.sink.filesystem.rollingpolicies.DefaultRollingPolicy
 
 import scala.collection.JavaConverters._
 import org.apache.flink.api.common.serialization.SimpleStringSchema
@@ -35,8 +40,8 @@ import org.apache.flink.streaming.api.windowing.assigners.{SlidingProcessingTime
 import org.apache.flink.streaming.util.serialization.JSONKeyValueDeserializationSchema
 import org.apache.flink.api.scala.{DataSet, createTypeInformation}
 import org.apache.flink.streaming.api.TimeCharacteristic
+import org.apache.flink.streaming.api.functions.sink.filesystem.StreamingFileSink
 import org.apache.flink.util.Collector
-import org.apache.flink.walkthrough.common.sink.AlertSink
 import org.apache.flink.walkthrough.common.entity.Alert
 import org.apache.flink.walkthrough.common.entity.Transaction
 import org.apache.flink.walkthrough.common.source.TransactionSource
@@ -72,7 +77,19 @@ object FraudDetectionJob {
 
       val ctr_compute_uid = AnomalyDetection.ctr_uid(click_and_displays_uid, 60, 30)
 
-      val fraudulent_ctr_uid_detection = AnomalyDetection.fraudulent_ctr_uid(ctr_compute_uid, 0.2, 3).print()
+      val fraudulent_ctr_uid_detection = AnomalyDetection.fraudulent_ctr_uid(ctr_compute_uid, 0.2, 3)
+
+      val sink_ctr_uid: StreamingFileSink[(String, String, String, Double, String, Int)] = StreamingFileSink
+        .forRowFormat(new Path("fraudulent_ctr_uid_detection"), new SimpleStringEncoder[(String, String, String, Double, String, Int)]("UTF-8"))
+        .withRollingPolicy(
+          DefaultRollingPolicy.builder()
+            .withRolloverInterval(TimeUnit.MINUTES.toMillis(5))
+            .withInactivityInterval(TimeUnit.MINUTES.toMillis(1))
+            .withMaxPartSize(1024*1024*1024)
+            .build())
+        .build();
+
+      fraudulent_ctr_uid_detection.addSink(sink_ctr_uid);
 
       """Fraudulent CTR IP"""
 
@@ -82,24 +99,59 @@ object FraudDetectionJob {
 
       val ctr_compute_ip = AnomalyDetection.ctr_ip(click_and_displays_ip, 300, 60)
 
-      val fraudulent_ctr_ip_detection = AnomalyDetection.fraudulent_ctr_ip(ctr_compute_ip, 0.05, 3).print()
+      val fraudulent_ctr_ip_detection = AnomalyDetection.fraudulent_ctr_ip(ctr_compute_ip, 0.2, 3)
+
+      val sink_ctr_ip: StreamingFileSink[(String, String, String, Double, String, Int)] = StreamingFileSink
+        .forRowFormat(new Path("fraudulent_ctr_ip_detection"), new SimpleStringEncoder[(String, String, String, Double, String, Int)]("UTF-8"))
+        .withRollingPolicy(
+          DefaultRollingPolicy.builder()
+            .withRolloverInterval(TimeUnit.MINUTES.toMillis(5))
+            .withInactivityInterval(TimeUnit.MINUTES.toMillis(1))
+            .withMaxPartSize(1024*1024*1024)
+            .build())
+        .build();
+
+      fraudulent_ctr_ip_detection.addSink(sink_ctr_ip);
 
 
-      """Fraudulent Timestamp
 
-      val uid_timestamps = stream_events.map(node => (node.findValue("uid").asText(), node.findValue("eventType").asText(), node.findValue("timestamp").asInt()))
+      """Fraudulent mean time ImpressionId per uid"""
+
+      val impressionId_timestamps_per_id = stream_events.map(node => (node.findValue("uid").asText(), node.findValue("impressionId").asText(), node.findValue("timestamp").asInt()))
         .map(value => (value._1 ,value._2, value._3))
 
-      val fraudulent_timestamp_uid_detection = AnomalyDetection.fraudulent_timestamp_per_uid(uid_timestamps, 1, 60, 30).print()
-      """
+      val impressionid_tmstp_per_uid = AnomalyDetection.fraud_impressionId_tmstp(impressionId_timestamps_per_id, 1, 60, 30)
 
-      """Fraudulent mean time ImpressionId"""
+      val sink_impressionid_tmstp_per_uid: StreamingFileSink[(String, String, String, Double)] = StreamingFileSink
+        .forRowFormat(new Path("fraudulent_impressionid_tmstp_per_uid"), new SimpleStringEncoder[(String, String, String, Double)]("UTF-8"))
+        .withRollingPolicy(
+          DefaultRollingPolicy.builder()
+            .withRolloverInterval(TimeUnit.MINUTES.toMillis(5))
+            .withInactivityInterval(TimeUnit.MINUTES.toMillis(1))
+            .withMaxPartSize(1024*1024*1024)
+            .build())
+        .build();
 
-      val impressionId_timestamps = stream_events.map(node => (node.findValue("uid").asText(), node.findValue("impressionId").asText(), node.findValue("timestamp").asInt()))
+      impressionid_tmstp_per_uid.addSink(sink_impressionid_tmstp_per_uid);
+
+      """Fraudulent mean time ImpressionId per ip"""
+
+      val impressionId_timestamps_per_ip = stream_events.map(node => (node.findValue("ip").asText(), node.findValue("impressionId").asText(), node.findValue("timestamp").asInt()))
         .map(value => (value._1 ,value._2, value._3))
 
-      val impressionid_tmstp = AnomalyDetection.fraud_impressionId_tmstp(impressionId_timestamps, 1, 60, 30).print()
+      val impressionid_tmstp_per_ip = AnomalyDetection.fraud_impressionId_per_ip_tmstp(impressionId_timestamps_per_ip, 1, 60, 30)
 
+      val sink_impressionid_tmstp_per_ip: StreamingFileSink[(String, String, String, Double)] = StreamingFileSink
+        .forRowFormat(new Path("fraudulent_impressionid_tmstp_per_ip"), new SimpleStringEncoder[(String, String, String, Double)]("UTF-8"))
+        .withRollingPolicy(
+          DefaultRollingPolicy.builder()
+            .withRolloverInterval(TimeUnit.MINUTES.toMillis(5))
+            .withInactivityInterval(TimeUnit.MINUTES.toMillis(1))
+            .withMaxPartSize(1024*1024*1024)
+            .build())
+        .build();
+
+      impressionid_tmstp_per_ip.addSink(sink_impressionid_tmstp_per_ip);
 
 
 

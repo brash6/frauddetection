@@ -9,28 +9,30 @@ import org.apache.flink.streaming.api.scala.function.ProcessWindowFunction
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow
 import org.apache.flink.util.Collector
 
-class cityChangeCheck extends ProcessWindowFunction[(String, String, Int), (String,String, Int), String, TimeWindow] {
+class FraudDetector extends ProcessWindowFunction[(String, Int, Int), (String,Int, Int), String, TimeWindow] {
   override def process(key: String,
                        context: Context,
-                       elements: Iterable[(String, String, Int)],
-                       out: Collector[(String, String, Int)]): Unit = {
+                       elements: Iterable[(String, Int, Int)],
+                       out: Collector[(String, Int, Int)]): Unit = {
 
-    var CTR = 0
-    val last_uid = ""
+    var difference = 0
+    var sum_difference = 0
+    var nb_clicks = 0
+    var last_tmsp = 0
     elements.foreach( value => {
-      val event = value._2.toLowerCase
+      val timestamp = value._2
+      nb_clicks += value._3
+      if(last_tmsp == 0){
+        last_tmsp = timestamp
+        difference = last_tmsp
+      }
       val current_uid = value._1
-      if(event == "click"){
-        val nb_click = value._3
+      if(!difference.equals(timestamp)) {
+        difference = timestamp - last_tmsp
+        sum_difference += difference
       }
-      else {
-        val nb_display = value._3
-      }
-      if (current_uid==last_uid){
-
-      }
-      if(event != "click"){
-        out.collect(("___Alarm____", s"${value} marked for FREQUENT city changes", 0))
+      if(nb_clicks == elements.size - 1){
+        out.collect((value._1, sum_difference/nb_clicks, nb_clicks))
       }
 
     })
